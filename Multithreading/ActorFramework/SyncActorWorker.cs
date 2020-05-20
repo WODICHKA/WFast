@@ -53,11 +53,17 @@ namespace WFast.ActorFramework
             private object _executor;
             private object _executorParam;
             private object _executorResult;
+            private Exception _exp;
 
             public bool Sync { get; private set; }
             public long ExecuteTime { get; private set; }
             public string ExecutorString => _executor.ToString();
-
+            public void SetException(Exception e) => _exp = e;
+            public void HandleException()
+            {
+                if (_exp != null)
+                    throw _exp;
+            }
             private AQuery() { }
             public AQuery(int queryHandle, bool isSync, long executeTime, object executor, object executorParam = null)
             {
@@ -77,7 +83,7 @@ namespace WFast.ActorFramework
             }
             public object GetResult() => _executorResult;
             public void StartWait() => _notify?.WaitOne();
-            private void MarkAsSuccess() => _notify?.Set();
+            public void MarkAsSuccess() => _notify?.Set();
 
             public void Process()
             {
@@ -161,6 +167,12 @@ namespace WFast.ActorFramework
                             {
                                 if (thisActor.Worker != null && thisActor.Worker.OnUserException != null)
                                     thisActor.Worker.OnUserException(query.QueryHandle, query.ExecutorString, thisActor.ActorNo, e);
+
+                                if (query.Sync)
+                                {
+                                    query.SetException(e);
+                                    query.MarkAsSuccess();
+                                }
                             }
                         }
                     }
@@ -676,6 +688,7 @@ namespace WFast.ActorFramework
             if (query.Sync)
             {
                 query.StartWait();
+                query.HandleException();
                 return query.GetResult();
             }
             else
