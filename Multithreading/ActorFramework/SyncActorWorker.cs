@@ -35,7 +35,7 @@ namespace WFast.ActorFramework
      * 
      * PushQuery(WorkerHandlers.Log, async, () => { File.WriteAllText("Hello world!"); }, -1)
      * PushQuery(WorkerHandlers.DB, sync, () => { postgre::query('drop all'); }, DateTime.Now.AddMinutes(1).Ticks); задача будет выполнена через минуту
-     * 
+     * s
      * worker.Destroy(true);
      * */
 
