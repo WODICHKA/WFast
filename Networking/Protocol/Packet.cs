@@ -38,6 +38,7 @@ namespace WFast.Networking.Protocol
                 throw new IndexOutOfRangeException();
 
             buffPtr = (byte*) Marshal.AllocHGlobal(packetSize);
+            MemoryHelper.ZeroMemory(buffPtr, packetSize);
 
             *(packetHeader*)(buffPtr) = _pHeader;
             Seek(0, SeekOrigin.Begin);
