@@ -3,7 +3,6 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using WFast.Memory;
 
 namespace WFast.Networking.Protocol
 {
@@ -37,8 +36,8 @@ namespace WFast.Networking.Protocol
             if (packetSize < HeaderSize)
                 throw new IndexOutOfRangeException();
 
-            buffPtr = (byte*) Marshal.AllocHGlobal(packetSize);
-            MemoryHelper.ZeroMemory(buffPtr, packetSize);
+            buffPtr = (byte*)Marshal.AllocHGlobal(packetSize);
+            new Span<byte>(buffPtr, packetSize).Fill(0);
 
             *(packetHeader*)(buffPtr) = _pHeader;
             Seek(0, SeekOrigin.Begin);
@@ -59,7 +58,7 @@ namespace WFast.Networking.Protocol
             buffPtr = (byte*)Marshal.AllocHGlobal(packetSize);
 
             fixed (byte* pinnedBuffer = &MemoryMarshal.GetReference(bf))
-                MemoryHelper.MemCopy(pinnedBuffer, buffPtr, packetSize);
+                Buffer.MemoryCopy(pinnedBuffer, buffPtr, packetSize, packetSize);
 
             _pHeader = *(packetHeader*)(buffPtr);
             Seek(0, SeekOrigin.Begin);
@@ -149,30 +148,30 @@ namespace WFast.Networking.Protocol
             *(byte*)(buffPtr + _offset) = _Val;
             forwardSeek(sizeof(byte));
         }
-
-        public unsafe void WriteNullTerminateString(string str)
+        public unsafe void WriteNullTerminateString(char[] chars, Encoding encode)
         {
-            WriteString(str);
+            WriteString(chars, encode);
             WriteByte(0);
+        }
+        public unsafe void WriteString(char[] chars, Encoding encode)
+        {
+            int lenght = encode.GetByteCount(chars);
+
+            if (!canAccess(lenght))
+                throw new OverflowException();
+
+            byte[] inputBytes = new byte[lenght];
+
+            encode.GetBytes(chars, 0, chars.Length, inputBytes, 0);
+
+            new ReadOnlySpan<byte>(inputBytes).CopyTo(new Span<byte>(buffPtr, lenght));
+
+            forwardSeek(lenght);
         }
         public unsafe void WriteNullTerminateString(string str, Encoding encode)
         {
             WriteString(str, encode);
             WriteByte(0);
-        }
-        public unsafe void WriteString(string str)
-        {
-            ReadOnlySpan<char> resultSpan = str.AsSpan();
-            int lenght = resultSpan.Length;
-
-            if (!canAccess(lenght))
-                throw new OverflowException();
-
-            fixed (char* pinnedSpan = &MemoryMarshal.GetReference(resultSpan))
-                MemoryHelper.MemCopy((byte*)pinnedSpan, (buffPtr + _offset), lenght);
-            forwardSeek(lenght);
-
-            return;
         }
         public unsafe void WriteString(string str, Encoding encode)
         {
@@ -183,7 +182,7 @@ namespace WFast.Networking.Protocol
                 throw new OverflowException();
 
             fixed (byte* pinnedBuffer = resultBuffer)
-                MemoryHelper.MemCopy(pinnedBuffer, (buffPtr + _offset), lenght);
+                Buffer.MemoryCopy(pinnedBuffer, buffPtr + _offset, lenght, lenght);
 
             forwardSeek(lenght);
         }
@@ -195,7 +194,7 @@ namespace WFast.Networking.Protocol
                 throw new OverflowException();
 
             fixed (byte* pinnedSpan = &MemoryMarshal.GetReference(bytes))
-                MemoryHelper.MemCopy(pinnedSpan, buffPtr + _offset, lenght);
+                Buffer.MemoryCopy(pinnedSpan, buffPtr + _offset, lenght, lenght);
 
             forwardSeek(lenght);
         }
@@ -263,18 +262,6 @@ namespace WFast.Networking.Protocol
             forwardSeek(sizeof(byte));
             return result;
         }
-
-        public unsafe string ReadString(int lenght)
-        {
-            if (!canAccess(lenght))
-                throw new OverflowException();
-
-            string resultString = new string(new ReadOnlySpan<char>(buffPtr + _offset, lenght));
-
-            forwardSeek(lenght);
-
-            return resultString;
-        }
         public unsafe string ReadString(int lenght, Encoding encode)
         {
             if (!canAccess(lenght))
@@ -284,28 +271,6 @@ namespace WFast.Networking.Protocol
 
             forwardSeek(lenght);
             return resultString;
-        }
-        public unsafe string ReadNullTerminateString()
-        {
-            int lenght = findStringLenght();
-
-            if (lenght == -1)
-                throw new OverflowException();
-            else if (lenght == -2)
-                throw new ArgumentException();
-
-            if (lenght > 0)
-            {
-                string resultString = new string(new ReadOnlySpan<char>(buffPtr + _offset, lenght));
-
-                forwardSeek(lenght);
-                return resultString;
-            }
-            else
-            {
-                forwardSeek(1);
-                return string.Empty;
-            }
         }
         public unsafe string ReadNullTerminateString(Encoding encode)
         {
@@ -320,7 +285,7 @@ namespace WFast.Networking.Protocol
             {
                 string resultString = encode.GetString(buffPtr + _offset, lenght);
 
-                forwardSeek(lenght);
+                forwardSeek(lenght + 1);
                 return resultString;
             }
             else
@@ -355,8 +320,11 @@ namespace WFast.Networking.Protocol
             int start = _offset;
 
             for (int currentPos = _offset; currentPos < Size; ++currentPos)
-                if (*(buffPtr + currentPos) == 0)
+            {
+                byte thisByte = *(buffPtr + currentPos);
+                if (thisByte == 0)
                     return currentPos - start;
+            }
 
             return -2;
         }
