@@ -27,6 +27,42 @@ namespace WFast.Networking.Protocol
 
         public int Size { get { return _pHeader.Size; } }
 
+        private Packet() { }
+        public Packet(packetHeader header)
+        {
+            _pHeader = header;
+
+            int packetSize = Size;
+
+            if (packetSize < HeaderSize)
+                throw new IndexOutOfRangeException();
+
+            buffPtr = (byte*) Marshal.AllocHGlobal(packetSize);
+
+            *(packetHeader*)(buffPtr) = _pHeader;
+            Seek(0, SeekOrigin.Begin);
+        }
+        public Packet(ReadOnlySpan<byte> bf)
+        {
+            if (bf.Length < HeaderSize)
+                throw new IndexOutOfRangeException();
+
+            int packetSize = 0;
+
+            fixed (byte* pinnedBuffer = &MemoryMarshal.GetReference(bf))
+                packetSize = CalculatePacketSize(pinnedBuffer);
+
+            if (packetSize < HeaderSize)
+                throw new IndexOutOfRangeException();
+
+            buffPtr = (byte*)Marshal.AllocHGlobal(packetSize);
+
+            fixed (byte* pinnedBuffer = &MemoryMarshal.GetReference(bf))
+                MemoryHelper.MemCopy(pinnedBuffer, buffPtr, packetSize);
+
+            _pHeader = *(packetHeader*)(buffPtr);
+            Seek(0, SeekOrigin.Begin);
+        }
         public Packet(byte[] bf)
         {
             if (bf.Length < HeaderSize)
