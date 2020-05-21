@@ -1,33 +1,35 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using WFast.Memory;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using PNLogService.Logs;
+using WFast.Collections;
+using WFast.Networking.Protocol;
 
 namespace WFast.Networking
 {
-    public delegate 
+    public delegate
         void ServerStartEvent(IPAddress listenIp, ushort listenPort, int bckLog, bool isSuccess, int retryTime);
-    public delegate 
+    public delegate
         void ServerAccessDeniedEvent(EndPoint ep, int emptySlots, bool isFull);
 
-    public delegate 
+    public delegate
         bool ServerConnectEvent(int clientFd, EndPoint remotePoint, out object clientData);
-    public delegate 
+    public delegate
         void ServerDisconnectEvent(int clientFd, object clientData, string disconnectReason);
-    public delegate 
+    public delegate
         void ServerOnReceivePacketEvent(byte[] packet, int clientFd, object clientData);
-    public unsafe delegate 
+    public unsafe delegate
         int PacketCalculateEvent(byte* buffer);
-    public delegate 
+    public delegate
         void ServerExceptionEvent(Exception e);
     public delegate
         void ClientAttemptDDosEvent(int clientId, int bytesInBuffer);
+
     internal class client
     {
         public int clientId;
@@ -58,7 +60,7 @@ namespace WFast.Networking
 
     public unsafe class TCPRawServer
     {
-        enum serverCommandTypes : byte { disconnect = 1, send_bytes = 2 }
+        enum serverCommandTypes : byte { disconnect = 1, send_bytes = 2, send_packet = 3 }
         struct serverCommand
         {
             public int clientFD;
@@ -69,6 +71,15 @@ namespace WFast.Networking
             public int sendOffset;
             public int countBytes;
 
+            public IPacket packet;
+            public static serverCommand makeSendPacketCommand(int clientFd, IPacket p)
+            {
+                return new serverCommand()
+                {
+                    packet = p,
+                    type = serverCommandTypes.send_packet
+                };
+            }
             public static serverCommand makeDisconnectCommand(int clientFd)
             {
                 return new serverCommand()
@@ -77,7 +88,7 @@ namespace WFast.Networking
                     type = serverCommandTypes.disconnect
                 };
             }
-            public static serverCommand makeSendPacketCommand(int clientFd, byte[] buff, int offset, int cb)
+            public static serverCommand makeSendBytesCommand(int clientFd, byte[] buff, int offset, int cb)
             {
                 return new serverCommand()
                 {
@@ -224,18 +235,26 @@ namespace WFast.Networking
 
         private void handleCommand(serverCommand cmd)
         {
-            if (cmd.type == serverCommandTypes.send_bytes)
+            if (cmd.type == serverCommandTypes.send_packet)
+                sendPacketClientHandler(cmd.clientFD, cmd.packet);
+            else if (cmd.type == serverCommandTypes.send_bytes)
                 sendbytesClientHandler(cmd.clientFD, cmd.sndBuffer, cmd.sendOffset, cmd.countBytes);
             else if (cmd.type == serverCommandTypes.disconnect)
                 disconnectClientHandler(cmd.clientFD);
         }
+        public void SendPacketToClient(int clientId, IPacket packet)
+        {
+            if (clientId < 0 || clientId >= maxClients)
+                return;
 
+            commandsQueue.Enqueue(serverCommand.makeSendPacketCommand(clientId, packet));
+        }
         public void SendBytesToClient(int clientId, byte[] buffer, int offset, int countBytes)
         {
             if (clientId < 0 || clientId >= maxClients)
                 return;
 
-            commandsQueue.Enqueue(serverCommand.makeSendPacketCommand(clientId, buffer, offset, countBytes));
+            commandsQueue.Enqueue(serverCommand.makeSendBytesCommand(clientId, buffer, offset, countBytes));
         }
         public void DisconnectClient(int clientId)
         {
@@ -244,7 +263,28 @@ namespace WFast.Networking
 
             commandsQueue.Enqueue(serverCommand.makeDisconnectCommand(clientId));
         }
+        private void sendPacketClientHandler(int clientId, IPacket packet)
+        {
+            client thisClient = clients[clientId];
 
+            if (thisClient == null)
+                return;
+
+            try
+            {
+                var packetSpan = packet.GetByteSpan();
+
+                fixed (byte* pinnedBuffer = &MemoryMarshal.GetReference(packetSpan))
+                {
+                    thisClient.sendStream.Write((IntPtr)(pinnedBuffer), packetSpan.Length);
+                }
+            }
+            catch (MemoryStreamIsFullException e)
+            {
+                secondCommandsQueue.Enqueue(serverCommand.makeSendPacketCommand(clientId, packet));
+            }
+            setClientToWrite(thisClient);
+        }
         private void sendbytesClientHandler(int clientId, byte[] buffer, int offset, int countBytes)
         {
             client thisClient = clients[clientId];
@@ -261,7 +301,7 @@ namespace WFast.Networking
             }
             catch (MemoryStreamIsFullException e)
             {
-                secondCommandsQueue.Enqueue(serverCommand.makeSendPacketCommand(clientId, buffer, offset, countBytes));
+                secondCommandsQueue.Enqueue(serverCommand.makeSendBytesCommand(clientId, buffer, offset, countBytes));
                 //callServerEvent($"Error push packet to client ({clientId}) memoryStream is full [{e.Message}] pushing in SecondQueue [size={secondCommandsQueue.Count}]");
             }
             setClientToWrite(thisClient);
@@ -510,7 +550,7 @@ namespace WFast.Networking
                     listenSock.Blocking = false;
 
                     if (OnServerStarted != null)
-                        OnServerStarted(listenIp, listenPort,backLog, true, connRetryTimeout);
+                        OnServerStarted(listenIp, listenPort, backLog, true, connRetryTimeout);
                     //callServerEvent($"Server has been started on [{listenIp}:{listenPort}]");
                     break;
                 }
@@ -602,6 +642,5 @@ namespace WFast.Networking
                     spinwait.SpinOnce();
             }
         }
-
     }
 }
