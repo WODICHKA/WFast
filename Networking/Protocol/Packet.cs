@@ -155,6 +155,8 @@ namespace WFast.Networking.Protocol
         }
         public unsafe void WriteString(char[] chars, Encoding encode)
         {
+            if (chars.Length == 0) return;
+
             int lenght = encode.GetByteCount(chars);
 
             if (!canAccess(lenght))
@@ -175,6 +177,8 @@ namespace WFast.Networking.Protocol
         }
         public unsafe void WriteString(string str, Encoding encode)
         {
+            if (str.Length == 0) return;
+
             byte[] resultBuffer = encode.GetBytes(str);
             int lenght = resultBuffer.Length;
 
