@@ -8,6 +8,7 @@ using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using WFast.Collections;
 using WFast.Networking.Protocol;
+using PNGCService.Logs;
 
 namespace WFast.Networking
 {
@@ -74,6 +75,7 @@ namespace WFast.Networking
                 return new serverCommand()
                 {
                     packet = p,
+                    clientFD = clientFd,
                     type = serverCommandTypes.send_packet
                 };
             }
@@ -510,9 +512,9 @@ namespace WFast.Networking
             }
 
             ReadOnlySpan<byte> dataBuffer = thisClient.sendStream.CanReadPtr();
-
+            
             int sended = thisClient.clientSock.Send(dataBuffer, SocketFlags.None, out SocketError errorCode);
-
+            Logger.WriteLine($"handleSocketWrite[{thisClient.clientId}]: {dataBuffer.Length} bytes => {sended}");
             if (errorCode != SocketError.Success)
             {
                 if (errorCode != SocketError.Shutdown && errorCode != SocketError.ConnectionReset && errorCode != SocketError.ConnectionRefused && errorCode != SocketError.ConnectionAborted)

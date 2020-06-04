@@ -1,4 +1,5 @@
-﻿using System;
+﻿using PNGCService.Logs;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
@@ -35,6 +36,7 @@ namespace WFast.Networking
         private int _maxPacketSize;
 
         public bool Connected { get; private set; }
+        private bool setToDisconnect;
 
         private int _rcnTimeout;
         /// <summary>
@@ -81,6 +83,11 @@ namespace WFast.Networking
             _outputStream = new ConcurrentMemoryStream(_maxPacketSize * outputStreamMultiply);
             rcvBuff = new byte[maxPacketSize];
         }
+        public void Disconnect()
+        {
+            setToDisconnect = true;
+        }
+
         public void SetLatencyMode(LatencyMode mode)
         {
             this.mode = mode;
@@ -129,7 +136,7 @@ namespace WFast.Networking
                 return;
 
             int tmpSend = remoteSocket.Send(writeStream.CanReadPtr(), SocketFlags.None, out SocketError errorCode);
-
+            Logger.WriteLine($"Sended to [{this.remoteIp}:{this.remotePort}] {tmpSend} bytes");
             if (errorCode != SocketError.Success)
             {
                 if (errorCode != SocketError.Shutdown && errorCode != SocketError.ConnectionReset && errorCode != SocketError.ConnectionRefused && errorCode != SocketError.ConnectionAborted)
@@ -227,6 +234,7 @@ namespace WFast.Networking
         }
         private unsafe void makeDisconnect(string reason)
         {
+            _outputStream.Clear();
             destroySocket();
 
             if (OnDisconnect != null)
@@ -248,8 +256,17 @@ namespace WFast.Networking
                 while (Volatile.Read(ref workerStarted) == 1)
                 {
                     if (remoteSocket == null)
+                    {
+                        localStream.Clear();
                         while (!Connect())
                             Thread.Sleep(ReconnectTimeout);
+                    }
+
+                    if (setToDisconnect)
+                    {
+                        makeDisconnect("called");
+                        continue;
+                    }
 
                     List<Socket> toRead = new List<Socket>();
                     List<Socket> toWrite = new List<Socket>();
@@ -328,6 +345,7 @@ namespace WFast.Networking
                     OnConnectSuccess(remoteIp, remotePort, null, "");
 
                 Connected = true;
+                setToDisconnect = false;
                 return true;
             }
             catch (Exception e)
