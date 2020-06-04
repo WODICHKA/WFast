@@ -6,7 +6,6 @@ using System.Net.Sockets;
 using System.Threading;
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
-using PNLogService.Logs;
 using WFast.Collections;
 using WFast.Networking.Protocol;
 
@@ -23,8 +22,6 @@ namespace WFast.Networking
         void ServerDisconnectEvent(int clientFd, object clientData, string disconnectReason);
     public delegate
         void ServerOnReceivePacketEvent(byte[] packet, int clientFd, object clientData);
-    public unsafe delegate
-        int PacketCalculateEvent(byte* buffer);
     public delegate
         void ServerExceptionEvent(Exception e);
     public delegate
@@ -53,7 +50,7 @@ namespace WFast.Networking
             this.clientId = clientId;
             this.clientData = clientData;
             clientSock = sock;
-            sendStream = new MemoryStream(sendStreamSize);
+            sendStream = new MemoryStream((IntPtr)sendStreamSize);
             rcvBuff = new byte[recvBufferSize];
         }
     }
@@ -102,14 +99,14 @@ namespace WFast.Networking
         }
 
         private PacketCalculateEvent calculatePacketSize;
-        private ServerConnectEvent onNewClientEv;
-        private ServerDisconnectEvent onDisconnectClientEv;
-        private ServerOnReceivePacketEvent onNewPacketEv;
+        private event ServerConnectEvent onNewClientEv;
+        private event ServerDisconnectEvent onDisconnectClientEv;
+        private event ServerOnReceivePacketEvent onNewPacketEv;
 
-        public ServerAccessDeniedEvent OnAccessDenied;
-        public ServerStartEvent OnServerStarted;
-        public ServerExceptionEvent OnServerException;
-        public ClientAttemptDDosEvent OnClientDDos;
+        public event ServerAccessDeniedEvent OnAccessDenied;
+        public event ServerStartEvent OnServerStarted;
+        public event ServerExceptionEvent OnServerException;
+        public event ClientAttemptDDosEvent OnClientDDos;
 
         private int connRetryTimeout;
         private IPAddress listenIp;
@@ -274,12 +271,9 @@ namespace WFast.Networking
             {
                 var packetSpan = packet.GetByteSpan();
 
-                fixed (byte* pinnedBuffer = &MemoryMarshal.GetReference(packetSpan))
-                {
-                    thisClient.sendStream.Write((IntPtr)(pinnedBuffer), packetSpan.Length);
-                }
+                thisClient.sendStream.Write(packetSpan);//(IntPtr)(pinnedBuffer), packetSpan.Length);
             }
-            catch (MemoryStreamIsFullException e)
+            catch (MemoryStreamIsFull)
             {
                 secondCommandsQueue.Enqueue(serverCommand.makeSendPacketCommand(clientId, packet));
             }
@@ -296,10 +290,10 @@ namespace WFast.Networking
             {
                 fixed (byte* pinnedBuffer = buffer)
                 {
-                    thisClient.sendStream.Write((IntPtr)(pinnedBuffer + offset), countBytes);
+                    thisClient.sendStream.Write(new ReadOnlySpan<byte>(pinnedBuffer + offset, countBytes));//(IntPtr)(pinnedBuffer + offset), countBytes);
                 }
             }
-            catch (MemoryStreamIsFullException e)
+            catch (MemoryStreamIsFull)
             {
                 secondCommandsQueue.Enqueue(serverCommand.makeSendBytesCommand(clientId, buffer, offset, countBytes));
                 //callServerEvent($"Error push packet to client ({clientId}) memoryStream is full [{e.Message}] pushing in SecondQueue [size={secondCommandsQueue.Count}]");
@@ -515,8 +509,7 @@ namespace WFast.Networking
                 return;
             }
 
-            IntPtr buffHndl = thisClient.sendStream.FlushAll(out int bytesToSend);
-            ReadOnlySpan<byte> dataBuffer = new ReadOnlySpan<byte>((void*)buffHndl, bytesToSend);
+            ReadOnlySpan<byte> dataBuffer = thisClient.sendStream.CanReadPtr();
 
             int sended = thisClient.clientSock.Send(dataBuffer, SocketFlags.None, out SocketError errorCode);
 
@@ -531,8 +524,8 @@ namespace WFast.Networking
                 onDisconnectEvent(thisClient, "Connection reset. [Send]");
                 return;
             }
-            else if (sended != bytesToSend)
-                thisClient.sendStream.Write(buffHndl + sended, bytesToSend - sended);
+
+            thisClient.sendStream.MarkAsRead(sended);
         }
 
         void worker()
@@ -545,6 +538,7 @@ namespace WFast.Networking
 
                 try
                 {
+                    listenSock.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                     listenSock.Bind(new IPEndPoint(listenIp, listenPort));
                     listenSock.Listen(backLog);
                     listenSock.Blocking = false;

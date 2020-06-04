@@ -66,6 +66,65 @@ namespace WFast.Collections
             Interlocked.MemoryBarrier();
             *(int*)head = (int)(count_bytes | 0x80000000);
         }
+        public bool WriteNoWait(ReadOnlySpan<byte> bf)
+        {
+            SpinWait sw = new SpinWait();
+            IntPtr head;
+
+            int count_bytes = bf.Length;
+
+            do
+            {
+                head = _writeptr;
+                IntPtr rslt = head + _controlInfoSize + count_bytes;
+
+                if ((long)rslt > (long)_endPtr)
+                {
+                    return false;
+                }
+
+                if (Interlocked.CompareExchange(ref _writeptr, rslt, head) == head)
+                    break;
+
+                sw.SpinOnce();
+            } while (true);
+
+
+            bf.CopyTo(new Span<byte>((byte*)(head + _controlInfoSize), count_bytes));
+            Interlocked.MemoryBarrier();
+            *(int*)head = (int)(count_bytes | 0x80000000);
+            return true;
+        }
+        public void Write(ReadOnlySpan<byte> bf)
+        {
+            SpinWait sw = new SpinWait();
+            IntPtr head;
+
+            int count_bytes = bf.Length;
+
+            do
+            {
+                head = _writeptr;
+                IntPtr rslt = head + _controlInfoSize + count_bytes;
+
+                if ((long)rslt > (long)_endPtr)
+                {
+                    sw.SpinOnce();
+                    Console.WriteLine("memstream: overflow [{0}] bytesInBuffer={1}", count_bytes, (long)_writeptr - (long)_hndl);
+                    continue;
+                }
+
+                if (Interlocked.CompareExchange(ref _writeptr, rslt, head) == head)
+                    break;
+
+                sw.SpinOnce();
+            } while (true);
+
+
+            bf.CopyTo(new Span<byte>((byte*)(head + _controlInfoSize), count_bytes));
+            Interlocked.MemoryBarrier();
+            *(int*)head = (int)(count_bytes | 0x80000000);
+        }
         public void Write(byte* buffer, int count_bytes)
         {
             SpinWait sw = new SpinWait();
@@ -96,6 +155,7 @@ namespace WFast.Collections
             
            // return head;
         }
+        public bool IsEmpty() => Volatile.Read(ref _writeptr) == Volatile.Read(ref _readptr);
         public int Read(byte* _OutPut)
         {
             if (_writeptr == _readptr)
@@ -131,5 +191,7 @@ namespace WFast.Collections
             _readptr += control_info + _controlInfoSize;
             return control_info;
         }
+
+        public long Avaliable => (_writeptr.ToInt64() - _readptr.ToInt64());
     }
 }
