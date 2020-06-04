@@ -588,7 +588,7 @@ namespace WFast.ActorFramework
                             if (i < 0)
                                 i = 0;
 
-                            handleQuery(currentQuery);
+                            handleQuery(currentQuery, _fromService: true);
                         }
                     }
                 }
@@ -666,7 +666,7 @@ namespace WFast.ActorFramework
                 }
             }
         }
-        private object handleQuery(AQuery query, bool _workerQuery = false)
+        private object handleQuery(AQuery query, bool _workerQuery = false, bool _fromService = false)
         {
             if (_workerQuery)
                 pushQueryToServiceWorkerNoexcept(query);
@@ -677,7 +677,7 @@ namespace WFast.ActorFramework
                 else
                 {
                     object result =
-                        handleQuery(new AQuery(-1, true, -1, new ParameterizedActorQueryRet(pushQueryToActorsNoexcept), query), true);
+                        handleQuery(new AQuery(-1, !_fromService, -1, new ParameterizedActorQueryRet(pushQueryToActorsNoexcept), query), true);
 
                     if (result != null)
                         throw result as Exception;
@@ -741,10 +741,7 @@ namespace WFast.ActorFramework
         {
             object rslt = null;
 
-            if (!this.workerLocked)
-                rslt = pushQueryToActorsNoexcept(thisQuery);
-            else
-                rslt = handleQuery(new AQuery(-1, true, -1, new ParameterizedActorQueryRet(pushQueryToActorsNoexcept), thisQuery), true);
+            rslt = pushQueryToActorsNoexcept(thisQuery);
 
             if (rslt != null)
                 throw rslt as Exception;
