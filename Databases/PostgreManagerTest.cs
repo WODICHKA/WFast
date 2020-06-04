@@ -1,8 +1,4 @@
-﻿//#define POSTGRE_MULTI_THREAD
-
-using System;
-using System.Collections.Generic;
-using System.Text;
+﻿using System;
 using Npgsql;
 
 namespace WFast.Databases.Postgre
@@ -26,12 +22,14 @@ namespace WFast.Databases.Postgre
     {
         private const string ERROR_CONN_RESET = "57P01";
         private readonly static string ERROR_CONNECTION = "Exception while connecting".ToLower();
+        private readonly static string ERROR_STARTINGUP = "57p03: the database system is starting up".ToLower();
+        private readonly static string ERROR_WHILEREADING = "Exception while reading from stream".ToLower();
 
         public delegate void PostgreEvent(string Host, string DB, int retry);
 
-        public PostgreEvent OnConnected;
-        public PostgreEvent OnConnectError;
-        public PostgreEvent OnDisconnected;
+        public event PostgreEvent OnConnected;
+        public event PostgreEvent OnConnectError;
+        public event PostgreEvent OnDisconnected;
         private int _rcnTryDelay;
         public int ReconnectTryDelay
         {
@@ -48,10 +46,6 @@ namespace WFast.Databases.Postgre
         private NpgsqlConnection _thisConnection;
         private NpgsqlConnectionStringBuilder connectionStringInfo;
 
-#if POSTGRE_MULTI_THREAD
-        private object _locker;
-#endif
-
         public PostgreManager(string host, string userName, string password, string database)
         {
             connectionStringInfo = new NpgsqlConnectionStringBuilder();
@@ -64,10 +58,6 @@ namespace WFast.Databases.Postgre
             _thisConnection = null;
 
             ReconnectTryDelay = 250;
-
-#if POSTGRE_MULTI_THREAD
-            _locker = new object();
-#endif
         }
 
         private void destroyConnection(bool iternal = true)
@@ -85,80 +75,56 @@ namespace WFast.Databases.Postgre
 
         public void Close()
         {
-#if POSTGRE_MULTI_THREAD
-            lock (_locker)
-            {
-#endif
-                destroyConnection(false);
-#if POSTGRE_MULTI_THREAD
-            }
-#endif
+            destroyConnection(false);
         }
 
         public NpgsqlDataReader ExecuteReader(string query)
         {
-#if POSTGRE_MULTI_THREAD
-            lock (_locker)
+            NpgsqlConnection conn = getConnection();
+
+            NpgsqlCommand command = conn.CreateCommand();
+
+            command.CommandText = query;
+
+            try
             {
-#endif
-
-                NpgsqlConnection conn = getConnection();
-
-                NpgsqlCommand command = conn.CreateCommand();
-
-                command.CommandText = query;
-
-                try
-                {
-                    return command.ExecuteReader();
-                }
-                catch (PostgresException postgreExp)
-                {
-                    if (postgreExp.Code == ERROR_CONN_RESET)
-                        return ExecuteReader(query);
-
-                    throw postgreExp;
-                }
-                catch (Exception e)
-                {
-                    throw e;
-                }
-
-#if POSTGRE_MULTI_THREAD
+                return command.ExecuteReader();
             }
-#endif
+            catch (PostgresException postgreExp)
+            {
+                if (postgreExp.Code == ERROR_CONN_RESET)
+                    return ExecuteReader(query);
+
+                throw postgreExp;
+            }
+            catch (Exception e)
+            {
+                throw e;
+            }
         }
         public int ExecuteNoReturn(string query)
         {
-#if POSTGRE_MULTI_THREAD
-            lock (_locker)
+            NpgsqlConnection conn = getConnection();
+
+            NpgsqlCommand command = conn.CreateCommand();
+
+            command.CommandText = query;
+
+            try
             {
-#endif
-                NpgsqlConnection conn = getConnection();
-
-                NpgsqlCommand command = conn.CreateCommand();
-
-                command.CommandText = query;
-
-                try
-                {
-                    return command.ExecuteNonQuery();
-                }
-                catch (PostgresException postgreExp)
-                {
-                    if (postgreExp.Code == ERROR_CONN_RESET)
-                        return ExecuteNoReturn(query);
-
-                    throw postgreExp;
-                }
-                catch (Exception e)
-                {
-                    throw e;
-                }
-
-#if POSTGRE_MULTI_THREAD
+                return command.ExecuteNonQuery();
             }
-#endif
+            catch (PostgresException postgreExp)
+            {
+                if (postgreExp.Code == ERROR_CONN_RESET)
+                    return ExecuteNoReturn(query);
+
+                throw postgreExp;
+            }
+            catch (Exception e)
+            {
+                throw e;
+            }
         }
 
         private NpgsqlConnection getConnection(int retry = 1)
@@ -166,27 +132,22 @@ namespace WFast.Databases.Postgre
             if (_thisConnection == null || !_thisConnection.IsConnected())
             {
                 this.Close();
-
                 _thisConnection = new NpgsqlConnection(connectionStringInfo.ToString());
-
                 try
                 {
-
                     _thisConnection.Open();
-
                 }
                 catch (NpgsqlException npgsqlConnection)
                 {
                     string message = npgsqlConnection.Message.ToLower();
 
-                    if (message != ERROR_CONNECTION)
+                    if (message != ERROR_CONNECTION && message != ERROR_STARTINGUP && message != ERROR_WHILEREADING)
                         throw npgsqlConnection;
                 }
                 catch (Exception e)
                 {
                     throw e;
                 }
-
                 if (_thisConnection.IsConnected())
                 {
                     if (OnConnected != null)
