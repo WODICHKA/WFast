@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace WFast.Collections
 {
-    public unsafe class ConcurrentMemoryStream 
+    public unsafe class ConcurrentMemoryStream
     {
         const int _controlInfoSize = sizeof(int);
 
@@ -36,7 +36,7 @@ namespace WFast.Collections
             Marshal.FreeHGlobal(_hndl);
         }
 
-        public void DoubleWrite(byte *bf_1, int bf_1Size, byte *bf_2, int bf_2Size)
+        public void DoubleWrite(byte* bf_1, int bf_1Size, byte* bf_2, int bf_2Size)
         {
             SpinWait sw = new SpinWait();
             IntPtr head;
@@ -149,11 +149,11 @@ namespace WFast.Collections
             } while (true);
 
 
-            Buffer.MemoryCopy(buffer,(byte*)(head + _controlInfoSize), count_bytes, count_bytes);
+            Buffer.MemoryCopy(buffer, (byte*)(head + _controlInfoSize), count_bytes, count_bytes);
             Interlocked.MemoryBarrier();
             *(int*)head = (int)(count_bytes | 0x80000000);
-            
-           // return head;
+
+            // return head;
         }
         public bool IsEmpty() => Volatile.Read(ref _writeptr) == Volatile.Read(ref _readptr);
         public int Read(byte* _OutPut)
@@ -183,7 +183,7 @@ namespace WFast.Collections
 
                 sw.SpinOnce();
             } while (true);
-            
+
             control_info &= 0x7fff;
 
             Buffer.MemoryCopy((byte*)(_readptr + _controlInfoSize), _OutPut, control_info, control_info);
@@ -191,7 +191,11 @@ namespace WFast.Collections
             _readptr += control_info + _controlInfoSize;
             return control_info;
         }
-
+        public void Clear()
+        {
+            Interlocked.Exchange(ref _writeptr, _hndl);
+            _readptr = _hndl;
+        }
         public long Avaliable => (_writeptr.ToInt64() - _readptr.ToInt64());
     }
 }

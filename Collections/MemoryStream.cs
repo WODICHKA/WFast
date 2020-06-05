@@ -56,7 +56,11 @@ namespace WFast.Collections
         }
 
         public bool IsEmpty() => _writePtr == _readPtr;
-
+        public void Clear()
+        {
+            _readPtr = _handle;
+            _writePtr = _handle;
+        }
         private unsafe bool grow(long need_size)
         {
             long resultNewSize = _bufferSize * 2;
